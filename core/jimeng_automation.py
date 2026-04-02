@@ -11,6 +11,9 @@ from typing import List, Dict, Optional, Tuple, Callable
 from pathlib import Path
 import threading
 
+# 导入便携版工具
+from core.portable_utils import setup_playwright_env, get_playwright_browser_path, check_browser_dependencies
+
 
 # 全局浏览器管理器（线程安全锁）
 _browser_lock = threading.Lock()
@@ -63,6 +66,22 @@ class JimengVideoAutomation:
         try:
             from playwright.sync_api import sync_playwright
 
+            # 设置便携版环境（使用打包的浏览器）
+            setup_playwright_env()
+
+            # 检查浏览器依赖
+            dep_check = check_browser_dependencies()
+            if not dep_check["chrome_found"]:
+                self._report_progress("❌ 未找到浏览器，请检查打包是否完整")
+                self._report_progress(f"   内部路径检查信息已输出到控制台")
+            elif not dep_check["can_run"]:
+                self._report_progress(f"❌ 浏览器无法启动: {dep_check['error']}")
+                self._report_progress("   可能原因：")
+                self._report_progress("   1. 缺少 Visual C++ Redistributable 运行库")
+                self._report_progress("   2. 缺少 Windows 系统更新")
+                self._report_progress("   解决方法：安装 VC++ Redistributable 2015-2022")
+                self._report_progress("   下载地址：https://aka.ms/vs/17/release/vc_redist.x64.exe")
+
             user_data_dir = self._get_user_data_dir()
 
             # 使用锁确保线程安全
@@ -101,13 +120,45 @@ class JimengVideoAutomation:
                     # 创建新的浏览器实例
                     self._report_progress("正在启动浏览器...", 1, 7)
 
+                    # 检查是否有便携版浏览器
+                    browser_path = get_playwright_browser_path()
+                    executable_path = None
+
+                    if browser_path:
+                        self._report_progress(f"使用便携版浏览器: {browser_path}")
+                        # 查找 chrome.exe 的实际路径
+                        browser_path_obj = Path(browser_path)
+                        # 可能的 chrome.exe 路径
+                        possible_exe_paths = [
+                            browser_path_obj / "chrome-win64" / "chrome.exe",
+                            browser_path_obj / "chrome-win" / "chrome.exe",
+                        ]
+                        for exe_path in possible_exe_paths:
+                            if exe_path.exists():
+                                executable_path = str(exe_path)
+                                self._report_progress(f"浏览器可执行文件: {executable_path}")
+                                break
+
                     self.playwright = sync_playwright().start()
-                    self.context = self.playwright.chromium.launch_persistent_context(
-                        user_data_dir=user_data_dir,
-                        headless=self.headless,
-                        args=["--disable-blink-features=AutomationControlled"],
-                        viewport={"width": 1400, "height": 1000},
-                    )
+
+                    # 如果找到了本地浏览器，使用 executable_path 参数
+                    if executable_path:
+                        self.context = self.playwright.chromium.launch_persistent_context(
+                            executable_path=executable_path,
+                            user_data_dir=user_data_dir,
+                            headless=self.headless,
+                            args=["--disable-blink-features=AutomationControlled"],
+                            viewport={"width": 1400, "height": 1000},
+                        )
+                    else:
+                        # 回退到默认浏览器
+                        self._report_progress("使用系统默认浏览器")
+                        self.context = self.playwright.chromium.launch_persistent_context(
+                            user_data_dir=user_data_dir,
+                            headless=self.headless,
+                            args=["--disable-blink-features=AutomationControlled"],
+                            viewport={"width": 1400, "height": 1000},
+                        )
 
                     # 保存到全局变量
                     _global_playwright = self.playwright

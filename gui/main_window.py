@@ -206,6 +206,30 @@ class MainWindow(ctk.CTk):
         )
         self.btn_settings.pack(side="left", padx=6)
 
+        # 导入脚本按钮（使用OptionMenu实现多格式选择）
+        self.btn_import_script = ctk.CTkOptionMenu(
+            left_btn_frame,
+            values=["📥 导入JSON", "📥 导入Excel"],
+            width=120, height=32,
+            command=self._on_import_script_menu,
+            fg_color="#16a085", button_color="#1abc9c",
+            button_hover_color="#16a085", dropdown_fg_color="#16a085"
+        )
+        self.btn_import_script.set("📥 导入脚本")
+        self.btn_import_script.pack(side="left", padx=6)
+
+        # 导出脚本按钮（使用OptionMenu实现多格式选择）
+        self.btn_export_script = ctk.CTkOptionMenu(
+            left_btn_frame,
+            values=["📤 导出JSON", "📤 导出Excel"],
+            width=120, height=32,
+            command=self._on_export_script_menu,
+            fg_color="#2980b9", button_color="#3498db",
+            button_hover_color="#2980b9", dropdown_fg_color="#2980b9"
+        )
+        self.btn_export_script.set("📤 导出脚本")
+        self.btn_export_script.pack(side="left", padx=6)
+
         # 添加按钮动效
         self._add_button_effects(self.btn_new_project)
         self._add_button_effects(self.btn_open_project)
@@ -1370,3 +1394,485 @@ headless=False,  # 显示浏览器窗口
                     if self.segments[i].prompt != new_prompt:
                         self.segments[i].prompt = new_prompt
                         self._set_unsaved(True)
+
+    def _on_export_script(self):
+        """导出片段脚本为JSON格式"""
+        # 同步表格数据
+        self._sync_table_data()
+
+        # 选择保存路径
+        file_path = filedialog.asksaveasfilename(
+            title="导出片段脚本",
+            defaultextension=".json",
+            filetypes=[("JSON文件", "*.json"), ("所有文件", "*.*")],
+            initialfile="segments_script.json"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            # 构建导出数据
+            export_data = {
+                "version": "1.0",
+                "export_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "description": self.text_input.get("1.0", "end-1c").strip(),
+                "segments": []
+            }
+
+            if self.segments:
+                for seg in self.segments:
+                    export_data["segments"].append({
+                        "index": seg.index,
+                        "prompt": seg.prompt,
+                        "duration": seg.duration,
+                        "references": seg.references,
+                        "narration": seg.narration
+                    })
+
+            # 写入文件
+            import json
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, ensure_ascii=False, indent=2)
+
+            if self.segments:
+                self._update_status(f"已导出 {len(self.segments)} 个片段到: {file_path}")
+                messagebox.showinfo("导出成功", f"片段脚本已导出到:\n{file_path}\n\n共 {len(self.segments)} 个片段")
+            else:
+                self._update_status(f"已导出模板到: {file_path}")
+                messagebox.showinfo("导出成功", f"模板已导出到:\n{file_path}\n\n可以编辑此文件后导入使用")
+
+        except Exception as e:
+            messagebox.showerror("导出失败", f"导出失败: {str(e)}")
+
+    def _on_export_script_excel(self):
+        """导出片段脚本为Excel格式"""
+        # 同步表格数据
+        self._sync_table_data()
+
+        # 选择保存路径
+        file_path = filedialog.asksaveasfilename(
+            title="导出片段脚本",
+            defaultextension=".xlsx",
+            filetypes=[("Excel文件", "*.xlsx"), ("所有文件", "*.*")],
+            initialfile="segments_script.xlsx"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+
+            # 创建工作簿
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "片段脚本"
+
+            # 设置表头样式
+            header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            header_font_white = Font(bold=True, size=12, color="FFFFFF")
+            thin_border = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thin')
+            )
+            wrap_alignment = Alignment(wrap_text=True, vertical='top')
+
+            # 写入表头
+            headers = ["序号", "时长(秒)", "提示词", "旁白", "引用文件"]
+            for col, header in enumerate(headers, 1):
+                cell = ws.cell(row=1, column=col, value=header)
+                cell.font = header_font_white
+                cell.fill = header_fill
+                cell.border = thin_border
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+
+            # 设置列宽
+            ws.column_dimensions['A'].width = 8   # 序号
+            ws.column_dimensions['B'].width = 10  # 时长
+            ws.column_dimensions['C'].width = 60  # 提示词
+            ws.column_dimensions['D'].width = 40  # 旁白
+            ws.column_dimensions['E'].width = 30  # 引用文件
+
+            if self.segments:
+                # 写入数据
+                for row, seg in enumerate(self.segments, 2):
+                    ws.cell(row=row, column=1, value=seg.index).border = thin_border
+                    ws.cell(row=row, column=2, value=seg.duration).border = thin_border
+
+                    prompt_cell = ws.cell(row=row, column=3, value=seg.prompt)
+                    prompt_cell.border = thin_border
+                    prompt_cell.alignment = wrap_alignment
+
+                    narration_cell = ws.cell(row=row, column=4, value=seg.narration or "")
+                    narration_cell.border = thin_border
+                    narration_cell.alignment = wrap_alignment
+
+                    refs_cell = ws.cell(row=row, column=5, value=", ".join(seg.references) if seg.references else "")
+                    refs_cell.border = thin_border
+                    refs_cell.alignment = wrap_alignment
+
+                    # 设置行高
+                    ws.row_dimensions[row].height = 60
+            else:
+                # 空模板：添加示例行说明
+                example_row = 2
+                ws.cell(row=example_row, column=1, value=1).border = thin_border
+                ws.cell(row=example_row, column=2, value=10).border = thin_border
+                example_cell = ws.cell(row=example_row, column=3, value="在此输入片段提示词...")
+                example_cell.border = thin_border
+                example_cell.alignment = wrap_alignment
+                example_cell.font = Font(italic=True, color="808080")
+
+                narration_cell = ws.cell(row=example_row, column=4, value="可选：旁白文本")
+                narration_cell.border = thin_border
+                narration_cell.alignment = wrap_alignment
+                narration_cell.font = Font(italic=True, color="808080")
+
+                refs_cell = ws.cell(row=example_row, column=5, value="可选：ref1.png, ref2.jpg")
+                refs_cell.border = thin_border
+                refs_cell.alignment = wrap_alignment
+                refs_cell.font = Font(italic=True, color="808080")
+
+                ws.row_dimensions[example_row].height = 60
+
+            # 冻结首行
+            ws.freeze_panes = 'A2'
+
+            # 保存文件
+            wb.save(file_path)
+
+            if self.segments:
+                self._update_status(f"已导出 {len(self.segments)} 个片段到: {file_path}")
+                messagebox.showinfo("导出成功", f"片段脚本已导出到:\n{file_path}\n\n共 {len(self.segments)} 个片段")
+            else:
+                self._update_status(f"已导出模板到: {file_path}")
+                messagebox.showinfo("导出成功", f"模板已导出到:\n{file_path}\n\n可以编辑此文件后导入使用")
+
+        except ImportError:
+            messagebox.showerror("导出失败", "缺少 openpyxl 库，请运行: pip install openpyxl")
+        except Exception as e:
+            messagebox.showerror("导出失败", f"导出失败: {str(e)}")
+
+    def _on_export_script_menu(self, choice: str):
+        """导出脚本菜单回调"""
+        if "JSON" in choice:
+            self._on_export_script()
+        elif "Excel" in choice:
+            self._on_export_script_excel()
+
+    def _on_import_script_menu(self, choice: str):
+        """导入脚本菜单回调"""
+        if "JSON" in choice:
+            self._on_import_script()
+        elif "Excel" in choice:
+            self._on_import_script_excel()
+
+    def _on_import_script(self):
+        """导入片段脚本(JSON格式)"""
+        # 选择文件
+        file_path = filedialog.askopenfilename(
+            title="导入片段脚本",
+            filetypes=[("JSON文件", "*.json"), ("所有文件", "*.*")]
+        )
+
+        if not file_path:
+            return
+
+        try:
+            import json
+            with open(file_path, 'r', encoding='utf-8') as f:
+                import_data = json.load(f)
+
+            # 验证数据格式
+            if not isinstance(import_data, dict):
+                messagebox.showerror("导入失败", "无效的脚本格式")
+                return
+
+            segments_data = import_data.get("segments", [])
+            if not segments_data:
+                messagebox.showwarning("警告", "脚本中没有片段数据")
+                return
+
+            # 显示预览对话框
+            if not self._show_import_preview(import_data, file_path):
+                return
+
+            # 清空现有数据
+            self.segments = []
+            self.segment_table.clear()
+
+            # 导入描述
+            description = import_data.get("description", "")
+            if description:
+                self.text_input.delete("1.0", "end")
+                self.text_input.insert("1.0", description)
+
+            # 导入片段
+            for seg_dict in segments_data:
+                segment = Segment(
+                    index=seg_dict.get("index", 0),
+                    prompt=seg_dict.get("prompt", ""),
+                    duration=seg_dict.get("duration", 10.0),
+                    references=seg_dict.get("references", []),
+                    video_path=seg_dict.get("video_path"),
+                    narration=seg_dict.get("narration", "")
+                )
+                self.segments.append(segment)
+
+            # 重新编号
+            for i, seg in enumerate(self.segments):
+                seg.index = i + 1
+
+            # 刷新表格
+            self.segment_table.set_segments(self.segments, self.materials)
+            self.segment_count_label.configure(text=f"片段: {len(self.segments)}")
+            self._set_unsaved(True)
+
+            self._update_status(f"已导入 {len(self.segments)} 个片段")
+            messagebox.showinfo("导入成功", f"成功导入 {len(self.segments)} 个片段")
+
+        except json.JSONDecodeError as e:
+            messagebox.showerror("导入失败", f"JSON解析失败: {str(e)}")
+        except Exception as e:
+            messagebox.showerror("导入失败", f"导入失败: {str(e)}")
+
+    def _on_import_script_excel(self):
+        """导入片段脚本(Excel格式)"""
+        # 选择文件
+        file_path = filedialog.askopenfilename(
+            title="导入片段脚本",
+            filetypes=[("Excel文件", "*.xlsx;*.xls"), ("所有文件", "*.*")]
+        )
+
+        if not file_path:
+            return
+
+        try:
+            from openpyxl import load_workbook
+
+            # 加载Excel文件
+            wb = load_workbook(file_path)
+            ws = wb.active
+
+            # 获取表头
+            headers = [cell.value for cell in ws[1]]
+            if not headers:
+                messagebox.showerror("导入失败", "Excel文件格式错误：缺少表头")
+                return
+
+            # 查找列索引
+            col_map = {}
+            for col_idx, header in enumerate(headers, 1):
+                if header:
+                    header_lower = str(header).lower()
+                    if "序号" in header_lower or "index" in header_lower:
+                        col_map["index"] = col_idx
+                    elif "时长" in header_lower or "duration" in header_lower:
+                        col_map["duration"] = col_idx
+                    elif "提示词" in header_lower or "prompt" in header_lower or "描述" in header_lower:
+                        col_map["prompt"] = col_idx
+                    elif "旁白" in header_lower or "narration" in header_lower:
+                        col_map["narration"] = col_idx
+                    elif "引用" in header_lower or "reference" in header_lower:
+                        col_map["references"] = col_idx
+
+            # 至少需要提示词列
+            if "prompt" not in col_map:
+                messagebox.showerror("导入失败", "Excel文件缺少「提示词」列")
+                return
+
+            # 读取数据行
+            segments_data = []
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                # 跳过空行
+                if not any(row):
+                    continue
+
+                seg = {}
+                if "index" in col_map and row[col_map["index"] - 1]:
+                    seg["index"] = int(row[col_map["index"] - 1])
+                if "duration" in col_map and row[col_map["duration"] - 1]:
+                    seg["duration"] = float(row[col_map["duration"] - 1])
+                if "prompt" in col_map and row[col_map["prompt"] - 1]:
+                    seg["prompt"] = str(row[col_map["prompt"] - 1])
+                if "narration" in col_map and row[col_map["narration"] - 1]:
+                    seg["narration"] = str(row[col_map["narration"] - 1])
+                if "references" in col_map and row[col_map["references"] - 1]:
+                    # 引用文件可能是逗号分隔的字符串
+                    refs_str = str(row[col_map["references"] - 1])
+                    seg["references"] = [r.strip() for r in refs_str.split(",") if r.strip()]
+
+                # 至少要有提示词
+                if seg.get("prompt"):
+                    segments_data.append(seg)
+
+            if not segments_data:
+                messagebox.showwarning("警告", "Excel文件中没有有效的片段数据")
+                return
+
+            # 构建导入数据用于预览
+            import_data = {
+                "version": "Excel导入",
+                "export_time": "",
+                "description": "",
+                "segments": segments_data
+            }
+
+            # 显示预览对话框
+            if not self._show_import_preview(import_data, file_path):
+                return
+
+            # 清空现有数据
+            self.segments = []
+            self.segment_table.clear()
+
+            # 导入片段
+            for seg_dict in segments_data:
+                segment = Segment(
+                    index=seg_dict.get("index", 0),
+                    prompt=seg_dict.get("prompt", ""),
+                    duration=seg_dict.get("duration", 10.0),
+                    references=seg_dict.get("references", []),
+                    narration=seg_dict.get("narration", "")
+                )
+                self.segments.append(segment)
+
+            # 重新编号
+            for i, seg in enumerate(self.segments):
+                seg.index = i + 1
+
+            # 刷新表格
+            self.segment_table.set_segments(self.segments, self.materials)
+            self.segment_count_label.configure(text=f"片段: {len(self.segments)}")
+            self._set_unsaved(True)
+
+            self._update_status(f"已导入 {len(self.segments)} 个片段")
+            messagebox.showinfo("导入成功", f"成功导入 {len(self.segments)} 个片段")
+
+        except ImportError:
+            messagebox.showerror("导入失败", "缺少 openpyxl 库，请运行: pip install openpyxl")
+        except Exception as e:
+            messagebox.showerror("导入失败", f"导入失败: {str(e)}")
+
+    def _show_import_preview(self, import_data: Dict, file_path: str) -> bool:
+        """显示导入预览对话框"""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("导入预览")
+        dialog.geometry("700x500")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # 淡入动效
+        dialog.attributes("-alpha", 0.0)
+        def fade_in():
+            current = float(dialog.attributes("-alpha"))
+            if current < 1.0:
+                dialog.attributes("-alpha", min(current + 0.15, 1.0))
+                dialog.after(20, fade_in)
+        dialog.after(0, fade_in)
+
+        result = [False]  # 用列表存储以便在闭包中修改
+
+        # 标题
+        title_label = ctk.CTkLabel(
+            dialog, text="片段脚本预览",
+            font=ctk.CTkFont(size=16, weight="bold")
+        )
+        title_label.pack(pady=10)
+
+        # 文件信息
+        info_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        info_frame.pack(fill="x", padx=20)
+
+        info_text = f"文件: {os.path.basename(file_path)}"
+        if import_data.get("export_time"):
+            info_text += f"  |  导出时间: {import_data['export_time']}"
+        if import_data.get("version"):
+            info_text += f"  |  版本: {import_data['version']}"
+
+        info_label = ctk.CTkLabel(info_frame, text=info_text, text_color="gray")
+        info_label.pack(anchor="w")
+
+        # 描述（如果有）
+        description = import_data.get("description", "")
+        if description:
+            desc_frame = ctk.CTkFrame(dialog)
+            desc_frame.pack(fill="x", padx=20, pady=5)
+            desc_title = ctk.CTkLabel(desc_frame, text="视频描述:", font=ctk.CTkFont(weight="bold"))
+            desc_title.pack(anchor="w", padx=10, pady=(5, 0))
+            desc_text = ctk.CTkLabel(desc_frame, text=description[:200] + ("..." if len(description) > 200 else ""),
+                                     wraplength=650, justify="left")
+            desc_text.pack(anchor="w", padx=10, pady=(0, 5))
+
+        # 片段列表
+        segments_data = import_data.get("segments", [])
+        list_label = ctk.CTkLabel(dialog, text=f"片段列表 (共 {len(segments_data)} 个):",
+                                  font=ctk.CTkFont(weight="bold"))
+        list_label.pack(anchor="w", padx=20, pady=(10, 5))
+
+        # 创建可滚动区域
+        scroll_frame = ctk.CTkScrollableFrame(dialog)
+        scroll_frame.pack(fill="both", expand=True, padx=20, pady=5)
+
+        for seg in segments_data[:20]:  # 最多显示20个预览
+            seg_frame = ctk.CTkFrame(scroll_frame)
+            seg_frame.pack(fill="x", pady=2)
+
+            # 序号和时长
+            index_text = f"#{seg.get('index', '?')}"
+            duration_text = f"{seg.get('duration', 10)}s"
+            header_label = ctk.CTkLabel(
+                seg_frame,
+                text=f"{index_text} [{duration_text}]",
+                font=ctk.CTkFont(weight="bold"),
+                width=80
+            )
+            header_label.pack(side="left", padx=5)
+
+            # 提示词预览
+            prompt = seg.get("prompt", "")
+            prompt_preview = prompt[:100] + "..." if len(prompt) > 100 else prompt
+            prompt_label = ctk.CTkLabel(
+                seg_frame,
+                text=prompt_preview if prompt_preview else "(空)",
+                text_color="gray" if not prompt_preview else None
+            )
+            prompt_label.pack(side="left", padx=5, fill="x", expand=True)
+
+        if len(segments_data) > 20:
+            more_label = ctk.CTkLabel(scroll_frame, text=f"... 还有 {len(segments_data) - 20} 个片段",
+                                      text_color="gray")
+            more_label.pack(pady=5)
+
+        # 底部按钮
+        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=20, pady=10)
+
+        def on_confirm():
+            result[0] = True
+            dialog.destroy()
+
+        def on_cancel():
+            dialog.destroy()
+
+        cancel_btn = ctk.CTkButton(
+            btn_frame, text="取消", width=80,
+            command=on_cancel,
+            fg_color="gray"
+        )
+        cancel_btn.pack(side="right", padx=5)
+
+        confirm_btn = ctk.CTkButton(
+            btn_frame, text="导入", width=80,
+            command=on_confirm
+        )
+        confirm_btn.pack(side="right", padx=5)
+
+        # 等待对话框关闭
+        self.wait_window(dialog)
+
+        return result[0]

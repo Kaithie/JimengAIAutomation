@@ -25,6 +25,17 @@ import customtkinter as ctk
 
 def main():
     """主函数"""
+    # 设置便携版环境（在导入其他模块之前）
+    try:
+        from core.portable_utils import setup_portable_env
+        env_status = setup_portable_env()
+        if env_status.get("playwright"):
+            print("[便携版] Playwright 浏览器已配置")
+        if env_status.get("ffmpeg"):
+            print("[便携版] FFmpeg 已配置")
+    except Exception as e:
+        print(f"[便携版] 环境配置失败: {e}")
+
     # 设置外观模式
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
