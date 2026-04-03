@@ -66,22 +66,57 @@ for %%d in (VCRUNTIME140.dll VCRUNTIME140_1.dll MSVCP140.dll MSVCP140_1.dll MSVC
     )
 )
 
-:: Step 5: Download FFmpeg
-echo [5/6] Downloading FFmpeg...
+:: Step 5: Copy FFmpeg (local first, then download)
+echo [5/6] Setting up FFmpeg...
 set "FFMPEG_DIR=dist\VideoClipSplitter\_internal\ffmpeg"
 if not exist "%FFMPEG_DIR%" mkdir "%FFMPEG_DIR%"
 
 if exist "%FFMPEG_DIR%\ffmpeg.exe" (
     echo FFmpeg already exists, skipping...
 ) else (
-    echo Downloading FFmpeg about 90MB...
-    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip' -OutFile 'ffmpeg_temp.zip' -UseBasicParsing"
-    if exist ffmpeg_temp.zip (
-        echo Extracting FFmpeg...
-        powershell -Command "Expand-Archive -Path 'ffmpeg_temp.zip' -DestinationPath 'ffmpeg_extract' -Force; Copy-Item 'ffmpeg_extract\ffmpeg-master-latest-win64-gpl\bin\ffmpeg.exe' '%FFMPEG_DIR%\' -Force; Copy-Item 'ffmpeg_extract\ffmpeg-master-latest-win64-gpl\bin\ffprobe.exe' '%FFMPEG_DIR%\' -Force"
-        del ffmpeg_temp.zip
-        rmdir /s /q ffmpeg_extract
-        echo FFmpeg installed.
+    :: Try local ffmpeg first (check common locations)
+    set "LOCAL_FFMPEG="
+
+    :: Check if ffmpeg is in PATH
+    where ffmpeg.exe >nul 2>&1
+    if !errorlevel! equ 0 (
+        for /f "tokens=*" %%i in ('where ffmpeg.exe') do set "LOCAL_FFMPEG=%%i"
+    )
+
+    :: Check common installation directories
+    if not defined LOCAL_FFMPEG (
+        for %%p in (
+            "C:\ffmpeg\bin\ffmpeg.exe"
+            "C:\Program Files\ffmpeg\bin\ffmpeg.exe"
+            "%LOCALAPPDATA%\ffmpeg\bin\ffmpeg.exe"
+            "%USERPROFILE%\ffmpeg\bin\ffmpeg.exe"
+            "%USERPROFILE%\scoop\apps\ffmpeg\current\bin\ffmpeg.exe"
+        ) do (
+            if exist %%p (
+                set "LOCAL_FFMPEG=%%p"
+                goto :found_local
+            )
+        )
+    )
+
+    :found_local
+    if defined LOCAL_FFMPEG (
+        echo Found local FFmpeg: !LOCAL_FFMPEG!
+        for %%i in ("!LOCAL_FFMPEG!") do set "FFMPEG_BIN_DIR=%%~dpi"
+        echo Copying from: !FFMPEG_BIN_DIR!
+        copy /Y "!FFMPEG_BIN_DIR!ffmpeg.exe" "%FFMPEG_DIR%\" >nul
+        if exist "!FFMPEG_BIN_DIR!ffprobe.exe" copy /Y "!FFMPEG_BIN_DIR!ffprobe.exe" "%FFMPEG_DIR%\" >nul
+        echo FFmpeg copied from local installation.
+    ) else (
+        echo Local FFmpeg not found, downloading...
+        powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip' -OutFile 'ffmpeg_temp.zip' -UseBasicParsing"
+        if exist ffmpeg_temp.zip (
+            echo Extracting FFmpeg...
+            powershell -Command "Expand-Archive -Path 'ffmpeg_temp.zip' -DestinationPath 'ffmpeg_extract' -Force; Copy-Item 'ffmpeg_extract\ffmpeg-master-latest-win64-gpl\bin\ffmpeg.exe' '%FFMPEG_DIR%\' -Force; Copy-Item 'ffmpeg_extract\ffmpeg-master-latest-win64-gpl\bin\ffprobe.exe' '%FFMPEG_DIR%\' -Force"
+            del ffmpeg_temp.zip
+            rmdir /s /q ffmpeg_extract
+            echo FFmpeg downloaded and installed.
+        )
     )
 )
 

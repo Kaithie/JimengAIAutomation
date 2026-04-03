@@ -12,7 +12,7 @@ from pathlib import Path
 import threading
 
 # 导入便携版工具
-from core.portable_utils import setup_playwright_env, get_playwright_browser_path, check_browser_dependencies
+from core.portable_utils import setup_playwright_env, get_playwright_browser_path
 
 
 # 全局浏览器管理器（线程安全锁）
@@ -69,19 +69,6 @@ class JimengVideoAutomation:
             # 设置便携版环境（使用打包的浏览器）
             setup_playwright_env()
 
-            # 检查浏览器依赖
-            dep_check = check_browser_dependencies()
-            if not dep_check["chrome_found"]:
-                self._report_progress("❌ 未找到浏览器，请检查打包是否完整")
-                self._report_progress(f"   内部路径检查信息已输出到控制台")
-            elif not dep_check["can_run"]:
-                self._report_progress(f"❌ 浏览器无法启动: {dep_check['error']}")
-                self._report_progress("   可能原因：")
-                self._report_progress("   1. 缺少 Visual C++ Redistributable 运行库")
-                self._report_progress("   2. 缺少 Windows 系统更新")
-                self._report_progress("   解决方法：安装 VC++ Redistributable 2015-2022")
-                self._report_progress("   下载地址：https://aka.ms/vs/17/release/vc_redist.x64.exe")
-
             user_data_dir = self._get_user_data_dir()
 
             # 使用锁确保线程安全
@@ -94,7 +81,10 @@ class JimengVideoAutomation:
                         # 尝试获取浏览器信息来验证是否存活
                         # 如果浏览器已关闭，这个操作会抛出异常
                         _ = _global_context.pages
-                        browser_alive = True
+                        # 额外检查：尝试获取浏览器连接状态
+                        # 这是一个更可靠的检查方式
+                        if _global_playwright and hasattr(_global_playwright, 'chromium'):
+                            browser_alive = True
                     except Exception:
                         # 浏览器已关闭，清理旧引用
                         self._report_progress("检测到浏览器已关闭，正在重新启动...", 1, 7)
@@ -111,6 +101,7 @@ class JimengVideoAutomation:
                         _global_user_data_dir = None
 
                     if browser_alive:
+                        # 浏览器存活，复用现有实例
                         self._report_progress("检测到已打开的浏览器，正在创建新标签页...", 1, 7)
                         self.playwright = _global_playwright
                         self.context = _global_context
@@ -299,7 +290,122 @@ class JimengVideoAutomation:
             self._report_progress("未找到全能参考选项，可能已是该模式")
 
         time.sleep(1)
+
+        # 切换模型到 Seedance 2.0 Fast（非VIP版本）
+        self._select_model_seedance_fast()
+
         return True
+
+    def _select_model_seedance_fast(self):
+        """
+        选择 Seedance 2.0 Fast 模型（非VIP版本）
+        即梦新增了 VIP 模型，需要手动切换到非VIP版本
+        """
+        try:
+            self._report_progress("正在检查并切换模型...")
+
+            # 等待页面稳定
+            time.sleep(1)
+
+            # 查找模型选择器（显示当前模型名称的元素）
+            # 模型选择器通常显示模型名称，如 "Seedance 2.0 Fast VIP" 或 "Seedance 2.0 Fast"
+            model_selectors = [
+                'div[role="combobox"]:has-text("Seedance")',
+                'div[role="combobox"]:has-text("模型")',
+                'button:has-text("Seedance")',
+                'div:has-text("Seedance"):not(:has(div))',  # 精确匹配包含Seedance的叶子节点
+            ]
+
+            model_selector = None
+            for selector in model_selectors:
+                try:
+                    elements = self.page.locator(selector)
+                    count = elements.count()
+                    for i in range(count):
+                        el = elements.nth(i)
+                        text = el.inner_text(timeout=500)
+                        # 找到包含 Seedance 的模型选择器
+                        if 'Seedance' in text and el.is_visible(timeout=1000):
+                            model_selector = el
+                            self._report_progress(f"找到模型选择器: {text}")
+                            break
+                    if model_selector:
+                        break
+                except:
+                    continue
+
+            if not model_selector:
+                self._report_progress("未找到模型选择器，可能已是正确模型")
+                return
+
+            # 检查当前模型是否已经是 Seedance 2.0 Fast（非VIP）
+            current_model = model_selector.inner_text(timeout=500)
+            if 'Seedance 2.0 Fast' in current_model and 'VIP' not in current_model:
+                self._report_progress("当前已是 Seedance 2.0 Fast 模型，无需切换")
+                return
+
+            # 点击展开模型下拉框
+            model_selector.click()
+            time.sleep(1)
+
+            # 选择 "Seedance 2.0 Fast"（非VIP版本）
+            # 尝试多种选择器定位非VIP版本
+            target_model = "Seedance 2.0 Fast"
+            option_selectors = [
+                f'li:has-text("{target_model}"):not(:has-text("VIP"))',
+                f'div:has-text("{target_model}"):not(:has-text("VIP"))',
+                f'[role="option"]:has-text("{target_model}"):not(:has-text("VIP"))',
+            ]
+
+            clicked = False
+            for selector in option_selectors:
+                try:
+                    options = self.page.locator(selector)
+                    count = options.count()
+                    for i in range(count):
+                        opt = options.nth(i)
+                        text = opt.inner_text(timeout=500).strip()
+                        # 精确匹配：包含目标模型名但不包含VIP
+                        if target_model in text and 'VIP' not in text:
+                            if opt.is_visible(timeout=1000):
+                                opt.click()
+                                clicked = True
+                                self._report_progress(f"已选择模型: {text}")
+                                break
+                    if clicked:
+                        break
+                except:
+                    continue
+
+            # 如果上面的方式没找到，尝试遍历所有选项
+            if not clicked:
+                try:
+                    all_options = self.page.locator('li:visible, [role="option"]:visible')
+                    opt_count = all_options.count()
+                    for i in range(opt_count):
+                        opt = all_options.nth(i)
+                        text = opt.inner_text(timeout=500).strip()
+                        # 精确匹配 Seedance 2.0 Fast 且不含 VIP
+                        if target_model in text and 'VIP' not in text and len(text) < 30:
+                            opt.click()
+                            clicked = True
+                            self._report_progress(f"已选择模型: {text}")
+                            break
+                except:
+                    pass
+
+            if not clicked:
+                self._report_progress("未找到 Seedance 2.0 Fast 模型选项，使用当前模型")
+                # 点击空白处关闭下拉框
+                try:
+                    self.page.mouse.click(10, 10)
+                except:
+                    pass
+
+            time.sleep(0.5)
+
+        except Exception as e:
+            self._report_progress(f"切换模型失败: {e}")
 
     def upload_files(self, file_paths: List[str]) -> bool:
         """
@@ -453,10 +559,13 @@ class JimengVideoAutomation:
 
     def _select_file_from_dropdown(self, file_index: int):
         """
-        从 @ 触发的下拉框中选择文件（参考 D:\jimeng-auto 正常工作的实现）
+        从 @ 触发的下拉框中选择文件
+
+        注意：即梦在2025年更新后，下拉框第一行新增了加号按钮，
+        因此实际选择文件时需要跳过第一行，索引需要 +1
 
         Args:
-            file_index: 要选择的文件索引（从 0 开始）
+            file_index: 要选择的文件索引（从 0 开始，对应上传顺序）
         """
         self._report_progress("等待文件下拉框出现...")
 
@@ -487,27 +596,32 @@ class JimengVideoAutomation:
         option_count = options.count()
         self._report_progress(f"检测到 {option_count} 个下拉选项")
 
+        # 计算实际选择的索引：由于第一行是加号，文件从第二行开始
+        # 文件索引 0 对应下拉框第 1 行（跳过第 0 行的加号）
+        actual_index = file_index + 1
+
         # 验证索引
-        if file_index >= option_count:
-            self._report_progress(f"警告: 文件索引 {file_index} 超出范围，将选择第一个")
-            file_index = 0
+        if actual_index >= option_count:
+            self._report_progress(f"警告: 计算后的索引 {actual_index} 超出范围，将选择第一个文件（索引1）")
+            actual_index = 1  # 选择第一个文件（跳过加号）
 
         # 选择对应索引的文件
         try:
-            target_option = options.nth(file_index)
+            target_option = options.nth(actual_index)
             if target_option.is_visible(timeout=2000):
                 target_option.click()
                 time.sleep(0.3)
-                self._report_progress(f"已选择第 {file_index + 1} 个文件")
+                self._report_progress(f"已选择第 {file_index + 1} 个文件（下拉框第 {actual_index + 1} 行）")
         except Exception as e:
             self._report_progress(f"点击选项失败: {e}")
             # 尝试键盘选择
             try:
-                for _ in range(file_index):
+                # 需要多按一次向下箭头来跳过加号行
+                for _ in range(actual_index):
                     self.page.keyboard.press('ArrowDown')
                     time.sleep(0.1)
                 self.page.keyboard.press('Enter')
-                self._report_progress(f"使用键盘选择第 {file_index + 1} 个文件")
+                self._report_progress(f"使用键盘选择第 {file_index + 1} 个文件（下拉框第 {actual_index + 1} 行）")
             except Exception as e2:
                 self._report_progress(f"键盘选择也失败: {e2}")
 
